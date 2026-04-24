@@ -1,8 +1,4 @@
 *.pyc
 __pycache__/
-.env
 /tmp/
-user_tokens/
-discord_booster_tokens/
-discord_booster_uploads/
-*.txt
+.env

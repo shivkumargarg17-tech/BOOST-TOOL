@@ -23,6 +23,9 @@
         th, td { text-align: left; padding: 12px; border-bottom: 1px solid #2a2a3e; }
         .valid { color: #57f287; }
         .nitro { color: #faa81a; }
+        .status { padding: 10px; border-radius: 8px; margin-top: 10px; }
+        .success { background: #1a3a2a; color: #57f287; }
+        .error { background: #3a1a1a; color: #ed4245; }
     </style>
 </head>
 <body>
@@ -35,17 +38,16 @@
     <div class="stats">
         <div class="stat"><div class="stat-num" id="totalTokens">0</div><div>Total Tokens</div></div>
         <div class="stat"><div class="stat-num" id="validTokens">0</div><div>Valid</div></div>
-        <div class="stat"><div class="stat-num" id="totalBoosts">0</div><div>Boosts</div></div>
+        <div class="stat"><div class="stat-num" id="totalBoosts">0</div><div>Boosts Available</div></div>
     </div>
 
     <div class="card">
-        <h2>📦 Tokens</h2>
-        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-            <input type="text" id="tokenInput" placeholder="Paste Discord token">
-            <button onclick="addToken()">Add</button>
-            <button onclick="importFile()" style="background:#23a55a;">Import File</button>
+        <h2>📦 Your Tokens</h2>
+        <div style="display: flex; gap: 10px;">
+            <input type="text" id="tokenInput" placeholder="Paste Discord token here">
+            <button onclick="addToken()">Add Token</button>
         </div>
-        <div style="overflow-x: auto;">
+        <div style="overflow-x: auto; margin-top: 15px;">
             <table id="tokenTable">
                 <thead><tr><th>Token</th><th>Username</th><th>Nitro</th><th>Boosts</th><th></th></tr></thead>
                 <tbody></tbody>
@@ -54,13 +56,18 @@
     </div>
 
     <div class="card">
-        <h2>🚀 Boost</h2>
+        <h2>🚀 Boost a Server</h2>
         <div style="display: flex; gap: 10px;">
-            <input type="text" id="inviteInput" placeholder="discord.gg/xxx">
+            <input type="text" id="inviteInput" placeholder="Server invite (discord.gg/xxx)">
             <input type="number" id="boostAmount" placeholder="Boosts" value="1" style="width: 100px;">
-            <button onclick="startBoost()">Boost</button>
+            <button onclick="startBoost()">Start Boosting</button>
         </div>
-        <div id="boostResult" style="margin-top: 10px;"></div>
+        <div id="boostStatus" style="margin-top: 10px;"></div>
+    </div>
+
+    <div class="card">
+        <h2>📜 Boost History</h2>
+        <div id="historyList"></div>
     </div>
 </div>
 
@@ -93,7 +100,7 @@
 
     async function addToken() {
         const token = document.getElementById('tokenInput').value.trim();
-        if (!token) return alert('Enter token');
+        if (!token) return alert('Enter a token');
         
         const res = await fetch('/api/tokens/add', {
             method: 'POST',
@@ -106,9 +113,9 @@
             document.getElementById('tokenInput').value = '';
             loadTokens();
         } else if (data.status === 'invalid') {
-            alert('Invalid token!');
-        } else if (data.status === 'exists') {
-            alert('Token already exists');
+            alert('Invalid token! ' + (data.error || ''));
+        } else {
+            alert('Error adding token');
         }
     }
 
@@ -119,37 +126,14 @@
         loadTokens();
     }
 
-    function importFile() {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.txt,.json';
-        input.onchange = async (e) => {
-            const file = e.target.files[0];
-            const formData = new FormData();
-            formData.append('user', userId);
-            formData.append('file', file);
-            
-            const res = await fetch('/api/upload', { method: 'POST', body: formData });
-            const data = await res.json();
-            
-            if (data.status === 'ok') {
-                alert(`✅ ${data.tokens_added} tokens added`);
-                loadTokens();
-            } else {
-                alert('Error: ' + (data.message || 'Unknown'));
-            }
-        };
-        input.click();
-    }
-
     async function startBoost() {
         const invite = document.getElementById('inviteInput').value.trim();
         const amount = document.getElementById('boostAmount').value;
         
-        if (!invite) return alert('Enter invite');
+        if (!invite) return alert('Enter server invite');
         
-        const resultDiv = document.getElementById('boostResult');
-        resultDiv.innerHTML = '<p>⏳ Starting boost process...</p>';
+        const statusDiv = document.getElementById('boostStatus');
+        statusDiv.innerHTML = '<div class="status">⏳ Starting boost process...</div>';
         
         const res = await fetch('/api/boost/start', {
             method: 'POST',
@@ -159,14 +143,40 @@
         const data = await res.json();
         
         if (data.error) {
-            resultDiv.innerHTML = `<p style="color:#ed4245;">❌ ${data.error}</p>`;
+            statusDiv.innerHTML = `<div class="status error">❌ ${data.error}</div>`;
         } else {
-            resultDiv.innerHTML = `<p style="color:#57f287;">✅ ${data.message}</p>`;
+            statusDiv.innerHTML = `<div class="status success">✅ ${data.message}</div>`;
             loadTokens();
+            loadHistory();
         }
     }
 
+    async function loadHistory() {
+        const res = await fetch(`/api/history?user=${userId}`);
+        const data = await res.json();
+        const historyDiv = document.getElementById('historyList');
+        
+        if (data.length === 0) {
+            historyDiv.innerHTML = '<p style="color:#666;">No boost history yet</p>';
+            return;
+        }
+        
+        historyDiv.innerHTML = '';
+        data.slice().reverse().forEach(h => {
+            const div = document.createElement('div');
+            div.style.cssText = 'background: #0a0a1a; border-radius: 8px; padding: 10px; margin-bottom: 8px;';
+            div.innerHTML = `
+                <div>📅 ${h.time}</div>
+                <div>🎯 Server: discord.gg/${h.invite}</div>
+                <div>✨ ${h.applied}/${h.target} boosts applied</div>
+                <div style="font-size: 12px; color: #666;">${h.results ? h.results.join(' · ') : ''}</div>
+            `;
+            historyDiv.appendChild(div);
+        });
+    }
+
     loadTokens();
+    loadHistory();
     setInterval(loadTokens, 30000);
 </script>
 </body>

