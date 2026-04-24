@@ -372,3 +372,6 @@ def admin_stats():
         },
         "users": list(tokens_data.keys())
     })
+@app.route('/admin')
+def admin_panel():
+    return render_template('admin.html')
