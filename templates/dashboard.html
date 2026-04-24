@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Discord Boost Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background: #0a0a1a; color: #fff; padding: 20px; }
+        .container { max-width: 1200px; margin: auto; }
+        .header { background: linear-gradient(135deg, #5865f2, #4752c4); padding: 20px; border-radius: 15px; margin-bottom: 20px; text-align: center; }
+        .user-badge { background: rgba(0,0,0,0.3); border-radius: 20px; padding: 5px 15px; display: inline-block; margin-top: 10px; }
+        .card { background: #1a1a2e; border-radius: 15px; padding: 20px; margin-bottom: 20px; border: 1px solid #2a2a3e; }
+        .card h2 { margin-bottom: 15px; border-left: 4px solid #5865f2; padding-left: 12px; }
+        input, button { padding: 12px 16px; margin: 5px; border-radius: 8px; border: none; font-size: 14px; }
+        input { background: #2a2a3e; color: white; border: 1px solid #3a3a4e; flex: 1; }
+        button { background: #5865f2; color: white; cursor: pointer; font-weight: bold; }
+        button:hover { background: #4752c4; }
+        .danger { background: #ed4245; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .stat { background: #1a1a2e; border-radius: 10px; padding: 15px; text-align: center; }
+        .stat-num { font-size: 2em; font-weight: bold; color: #5865f2; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #2a2a3e; }
+        .valid { color: #57f287; }
+        .nitro { color: #faa81a; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>🎮 Discord Boost Dashboard</h1>
+        <div class="user-badge">User: <strong id="username"></strong></div>
+    </div>
+
+    <div class="stats">
+        <div class="stat"><div class="stat-num" id="totalTokens">0</div><div>Total Tokens</div></div>
+        <div class="stat"><div class="stat-num" id="validTokens">0</div><div>Valid</div></div>
+        <div class="stat"><div class="stat-num" id="totalBoosts">0</div><div>Boosts</div></div>
+    </div>
+
+    <div class="card">
+        <h2>📦 Tokens</h2>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <input type="text" id="tokenInput" placeholder="Paste Discord token">
+            <button onclick="addToken()">Add</button>
+            <button onclick="importFile()" style="background:#23a55a;">Import File</button>
+        </div>
+        <div style="overflow-x: auto;">
+            <table id="tokenTable">
+                <thead><tr><th>Token</th><th>Username</th><th>Nitro</th><th>Boosts</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🚀 Boost</h2>
+        <div style="display: flex; gap: 10px;">
+            <input type="text" id="inviteInput" placeholder="discord.gg/xxx">
+            <input type="number" id="boostAmount" placeholder="Boosts" value="1" style="width: 100px;">
+            <button onclick="startBoost()">Boost</button>
+        </div>
+        <div id="boostResult" style="margin-top: 10px;"></div>
+    </div>
+</div>
+
+<script>
+    const userId = new URLSearchParams(location.search).get('user') || 'default';
+    document.getElementById('username').innerText = userId;
+    
+    let hiddenTokens = new Set(JSON.parse(localStorage.getItem(`hidden_${userId}`) || '[]'));
+
+    async function loadTokens() {
+        const res = await fetch(`/api/tokens?user=${userId}`);
+        const data = await res.json();
+        const visible = data.filter(t => !hiddenTokens.has(t.full_token));
+        
+        document.getElementById('totalTokens').innerText = visible.length;
+        document.getElementById('validTokens').innerText = visible.filter(t => t.valid).length;
+        document.getElementById('totalBoosts').innerText = visible.reduce((s, t) => s + (t.boosts || 0), 0);
+        
+        const tbody = document.querySelector('#tokenTable tbody');
+        tbody.innerHTML = '';
+        visible.forEach(t => {
+            const row = tbody.insertRow();
+            row.insertCell(0).innerHTML = `<code style="font-size:11px;">${t.token}</code>`;
+            row.insertCell(1).innerHTML = t.username || '?';
+            row.insertCell(2).innerHTML = t.nitro !== "No Nitro" ? `<span class="nitro">${t.nitro}</span>` : 'None';
+            row.insertCell(3).innerHTML = t.valid ? `<span class="valid">${t.boosts}</span>` : '❌';
+            row.insertCell(4).innerHTML = `<button class="danger" onclick="removeToken('${t.full_token.replace(/'/g, "\\'")}')">Remove</button>`;
+        });
+    }
+
+    async function addToken() {
+        const token = document.getElementById('tokenInput').value.trim();
+        if (!token) return alert('Enter token');
+        
+        const res = await fetch('/api/tokens/add', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user: userId, token})
+        });
+        const data = await res.json();
+        
+        if (data.status === 'ok') {
+            document.getElementById('tokenInput').value = '';
+            loadTokens();
+        } else if (data.status === 'invalid') {
+            alert('Invalid token!');
+        } else if (data.status === 'exists') {
+            alert('Token already exists');
+        }
+    }
+
+    function removeToken(fullToken) {
+        if (!confirm('Remove this token?')) return;
+        hiddenTokens.add(fullToken);
+        localStorage.setItem(`hidden_${userId}`, JSON.stringify([...hiddenTokens]));
+        loadTokens();
+    }
+
+    function importFile() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.txt,.json';
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            const formData = new FormData();
+            formData.append('user', userId);
+            formData.append('file', file);
+            
+            const res = await fetch('/api/upload', { method: 'POST', body: formData });
+            const data = await res.json();
+            
+            if (data.status === 'ok') {
+                alert(`✅ ${data.tokens_added} tokens added`);
+                loadTokens();
+            } else {
+                alert('Error: ' + (data.message || 'Unknown'));
+            }
+        };
+        input.click();
+    }
+
+    async function startBoost() {
+        const invite = document.getElementById('inviteInput').value.trim();
+        const amount = document.getElementById('boostAmount').value;
+        
+        if (!invite) return alert('Enter invite');
+        
+        const resultDiv = document.getElementById('boostResult');
+        resultDiv.innerHTML = '<p>⏳ Starting boost process...</p>';
+        
+        const res = await fetch('/api/boost/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user: userId, invite, target_boosts: parseInt(amount)})
+        });
+        const data = await res.json();
+        
+        if (data.error) {
+            resultDiv.innerHTML = `<p style="color:#ed4245;">❌ ${data.error}</p>`;
+        } else {
+            resultDiv.innerHTML = `<p style="color:#57f287;">✅ ${data.message}</p>`;
+            loadTokens();
+        }
+    }
+
+    loadTokens();
+    setInterval(loadTokens, 30000);
+</script>
+</body>
+</html>
