@@ -22,10 +22,9 @@
         table { width: 100%; border-collapse: collapse; }
         th, td { text-align: left; padding: 12px; border-bottom: 1px solid #2a2a3e; }
         .valid { color: #57f287; }
-        .nitro { color: #faa81a; }
-        .status { padding: 10px; border-radius: 8px; margin-top: 10px; }
-        .success { background: #1a3a2a; color: #57f287; }
-        .error { background: #3a1a1a; color: #ed4245; }
+        .success { color: #57f287; }
+        .error { color: #ed4245; }
+        .status-box { background: #0a0a1a; padding: 10px; border-radius: 8px; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -49,7 +48,7 @@
         </div>
         <div style="overflow-x: auto; margin-top: 15px;">
             <table id="tokenTable">
-                <thead><tr><th>Token</th><th>Username</th><th>Nitro</th><th>Boosts</th><th></th></tr></thead>
+                <thead><tr><th>Token</th><th>Username</th><th>Status</th><th>Boosts</th><th></th></tr></thead>
                 <tbody></tbody>
             </table>
         </div>
@@ -62,7 +61,7 @@
             <input type="number" id="boostAmount" placeholder="Boosts" value="1" style="width: 100px;">
             <button onclick="startBoost()">Start Boosting</button>
         </div>
-        <div id="boostStatus" style="margin-top: 10px;"></div>
+        <div id="boostStatus" class="status-box"></div>
     </div>
 
     <div class="card">
@@ -92,8 +91,8 @@
             const row = tbody.insertRow();
             row.insertCell(0).innerHTML = `<code style="font-size:11px;">${t.token}</code>`;
             row.insertCell(1).innerHTML = t.username || '?';
-            row.insertCell(2).innerHTML = t.nitro !== "No Nitro" ? `<span class="nitro">${t.nitro}</span>` : 'None';
-            row.insertCell(3).innerHTML = t.valid ? `<span class="valid">${t.boosts}</span>` : '❌';
+            row.insertCell(2).innerHTML = t.valid ? '<span class="valid">✅ Valid</span>' : '❌ Invalid';
+            row.insertCell(3).innerHTML = t.boosts || 0;
             row.insertCell(4).innerHTML = `<button class="danger" onclick="removeToken('${t.full_token.replace(/'/g, "\\'")}')">Remove</button>`;
         });
     }
@@ -120,7 +119,7 @@
     }
 
     function removeToken(fullToken) {
-        if (!confirm('Remove this token?')) return;
+        if (!confirm('Remove this token from view? (Still stored)')) return;
         hiddenTokens.add(fullToken);
         localStorage.setItem(`hidden_${userId}`, JSON.stringify([...hiddenTokens]));
         loadTokens();
@@ -133,7 +132,7 @@
         if (!invite) return alert('Enter server invite');
         
         const statusDiv = document.getElementById('boostStatus');
-        statusDiv.innerHTML = '<div class="status">⏳ Starting boost process...</div>';
+        statusDiv.innerHTML = '<p>⏳ Starting boost process...</p>';
         
         const res = await fetch('/api/boost/start', {
             method: 'POST',
@@ -143,9 +142,9 @@
         const data = await res.json();
         
         if (data.error) {
-            statusDiv.innerHTML = `<div class="status error">❌ ${data.error}</div>`;
+            statusDiv.innerHTML = `<p class="error">❌ ${data.error}</p>`;
         } else {
-            statusDiv.innerHTML = `<div class="status success">✅ ${data.message}</div>`;
+            statusDiv.innerHTML = `<p class="success">✅ ${data.message}</p>`;
             loadTokens();
             loadHistory();
         }
@@ -169,7 +168,6 @@
                 <div>📅 ${h.time}</div>
                 <div>🎯 Server: discord.gg/${h.invite}</div>
                 <div>✨ ${h.applied}/${h.target} boosts applied</div>
-                <div style="font-size: 12px; color: #666;">${h.results ? h.results.join(' · ') : ''}</div>
             `;
             historyDiv.appendChild(div);
         });
