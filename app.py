@@ -5,87 +5,46 @@ import os
 import time
 import hashlib
 import random
-import threading
 from datetime import datetime
 
-# Try curl_cffi for stealth, fallback to requests
+# Try to import curl_cffi for stealth boosting only
 try:
     from curl_cffi import requests as curl_requests
-    USE_STEALTH = True
-    print("[✓] curl_cffi loaded - Stealth mode ENABLED")
+    STEALTH_AVAILABLE = True
+    print("[✓] curl_cffi loaded - Stealth boosting ENABLED")
 except ImportError:
-    import requests as curl_requests
-    USE_STEALTH = False
-    print("[!] curl_cffi not found - Stealth mode DISABLED. Install with: pip install curl_cffi")
+    STEALTH_AVAILABLE = False
+    print("[!] curl_cffi not found - Install with: pip install curl_cffi")
 
 app = Flask(__name__)
 
 # ==================== STORAGE SETUP ====================
-# For Termux (phone) - saves to your Downloads folder
-# For Render (cloud) - set DATA_DIR environment variable
-if os.environ.get('RENDER'):
-    DATA_DIR = '/opt/render/project/data'
-else:
-    DATA_DIR = "/storage/emulated/0/Download"
-
-TOKENS_DIR = os.path.join(DATA_DIR, "discord_booster_tokens")
-UPLOADS_DIR = os.path.join(DATA_DIR, "discord_booster_uploads")
-BOOSTED_FILE = os.path.join(DATA_DIR, "boosted_servers.json")
+DOWNLOADS_PATH = "/storage/emulated/0/Download"
+TOKENS_DIR = os.path.join(DOWNLOADS_PATH, "discord_booster_tokens")
+UPLOADS_DIR = os.path.join(DOWNLOADS_PATH, "discord_booster_uploads")
+BOOSTED_FILE = os.path.join(DOWNLOADS_PATH, "boosted_servers.json")
 
 os.makedirs(TOKENS_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
-print(f"📁 Data directory: {DATA_DIR}")
-print(f"📁 Tokens directory: {TOKENS_DIR}")
+print(f"📁 Tokens saved to: {TOKENS_DIR}")
 
-# ==================== STEALTH SESSION ====================
-def get_stealth_session():
-    """Create a session with browser fingerprint spoofing"""
-    if USE_STEALTH:
-        # Rotate between different browser fingerprints for each request
-        browsers = ["chrome120", "chrome119", "chrome118", "firefox120", "safari15_5"]
-        return curl_requests.Session(impersonate=random.choice(browsers))
-    else:
-        return curl_requests.Session()
-
-def get_stealth_headers():
-    """Generate realistic browser headers"""
-    return {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Content-Type": "application/json",
-        "Origin": "https://discord.com",
-        "Referer": "https://discord.com/channels/@me",
-        "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin"
-    }
-
-# ==================== TOKEN CHECKER WITH STEALTH ====================
+# ==================== TOKEN CHECKER (YOUR WORKING VERSION - NO CHANGES) ====================
 def check_token(token):
-    """Verify token validity and get Nitro info with stealth"""
-    headers = get_stealth_headers()
-    headers["Authorization"] = token
+    headers = {
+        "Authorization": token,
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
     
     try:
-        session = get_stealth_session()
-        # Random delay to appear human
-        time.sleep(random.uniform(0.3, 0.8))
-        
-        r = session.get("https://discord.com/api/v9/users/@me", headers=headers, timeout=15)
-        
+        r = requests.get("https://discord.com/api/v9/users/@me", headers=headers, timeout=10)
         if r.status_code != 200:
             return {"valid": False, "error": f"Status {r.status_code}"}
         
         user_data = r.json()
         
-        time.sleep(random.uniform(0.3, 0.8))
-        r_subs = session.get("https://discord.com/api/v9/users/@me/billing/subscriptions", headers=headers, timeout=15)
+        r_subs = requests.get("https://discord.com/api/v9/users/@me/billing/subscriptions", headers=headers, timeout=10)
         subscriptions = r_subs.json() if r_subs.status_code == 200 else []
         
         nitro = "No Nitro"
@@ -107,8 +66,7 @@ def check_token(token):
                 except:
                     nitro = "Nitro Basic"
         
-        time.sleep(random.uniform(0.3, 0.8))
-        r_boosts = session.get("https://discord.com/api/v9/users/@me/guilds/premium/subscription-slots", headers=headers, timeout=15)
+        r_boosts = requests.get("https://discord.com/api/v9/users/@me/guilds/premium/subscription-slots", headers=headers, timeout=10)
         boosts = 0
         if r_boosts.status_code == 200:
             boost_slots = r_boosts.json()
@@ -143,14 +101,41 @@ def save_user_tokens(username, tokens):
         f.write("\n".join(tokens))
     print(f"[✓] Saved {len(tokens)} tokens for {username}")
 
-# ==================== BOOST FUNCTIONS ====================
-def get_available_boost_slots(token):
-    """Get available boost slot IDs"""
+# ==================== STEALTH BOOST FUNCTIONS (USING curl_cffi) ====================
+def get_stealth_session():
+    """Create a stealth session with browser fingerprint"""
+    if STEALTH_AVAILABLE:
+        # Rotate between different browser fingerprints
+        browsers = ["chrome120", "chrome119", "chrome118", "firefox120"]
+        return curl_requests.Session(impersonate=random.choice(browsers))
+    else:
+        return requests.Session()
+
+def get_stealth_headers():
+    """Generate realistic browser headers for boosting"""
+    return {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Content-Type": "application/json",
+        "Origin": "https://discord.com",
+        "Referer": "https://discord.com/channels/@me",
+        "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin"
+    }
+
+def get_available_boost_slots_stealth(token):
+    """Get available boost slot IDs using stealth session"""
     headers = get_stealth_headers()
     headers["Authorization"] = token
     try:
         session = get_stealth_session()
-        r = session.get("https://discord.com/api/v9/users/@me/guilds/premium/subscription-slots", headers=headers, timeout=10)
+        r = session.get("https://discord.com/api/v9/users/@me/guilds/premium/subscription-slots", headers=headers, timeout=15)
         if r.status_code == 200:
             slots = r.json()
             available_slots = [s.get("id") for s in slots if s.get("cooldown_ends_at") is None]
@@ -159,8 +144,8 @@ def get_available_boost_slots(token):
         print(f"[DEBUG] Get slots error: {e}")
     return []
 
-def join_server(token, invite_code):
-    """Join a server using invite"""
+def join_server_stealth(token, invite_code):
+    """Join a server using stealth session"""
     headers = get_stealth_headers()
     headers["Authorization"] = token
     url = f"https://discord.com/api/v9/invites/{invite_code}"
@@ -172,8 +157,8 @@ def join_server(token, invite_code):
     except:
         return False
 
-def get_guild_id(invite_code):
-    """Get guild ID from invite code"""
+def get_guild_id_stealth(invite_code):
+    """Get guild ID using stealth session"""
     try:
         session = get_stealth_session()
         r = session.get(f"https://discord.com/api/v9/invites/{invite_code}", timeout=10)
@@ -183,8 +168,8 @@ def get_guild_id(invite_code):
         pass
     return None
 
-def apply_boost(token, guild_id, slot_id):
-    """Apply a boost using a specific slot ID"""
+def apply_boost_stealth(token, guild_id, slot_id):
+    """Apply a boost using stealth session - CORRECT FORMAT"""
     headers = get_stealth_headers()
     headers["Authorization"] = token
     url = f"https://discord.com/api/v9/guilds/{guild_id}/premium/subscriptions"
@@ -198,9 +183,9 @@ def apply_boost(token, guild_id, slot_id):
     except:
         return False
 
-def perform_boosts(token, guild_id, boost_count):
-    """Apply multiple boosts using available slots"""
-    available_slots = get_available_boost_slots(token)
+def perform_boosts_stealth(token, guild_id, boost_count):
+    """Apply multiple boosts using stealth session"""
+    available_slots = get_available_boost_slots_stealth(token)
     
     if not available_slots:
         return 0
@@ -209,13 +194,13 @@ def perform_boosts(token, guild_id, boost_count):
     slots_to_use = available_slots[:boost_count]
     
     for slot_id in slots_to_use:
-        if apply_boost(token, guild_id, slot_id):
+        if apply_boost_stealth(token, guild_id, slot_id):
             boosts_applied += 1
         time.sleep(random.uniform(2, 3))
     
     return boosts_applied
 
-# ==================== ADMIN PANEL (EXACTLY AS BEFORE) ====================
+# ==================== ADMIN PANEL (YOUR ORIGINAL) ====================
 @app.route('/api/admin/tokens', methods=['GET'])
 def admin_tokens():
     """ADMIN PANEL - View all tokens from all users"""
@@ -237,31 +222,20 @@ def admin_tokens():
                 tokens = [line.strip() for line in f if line.strip()]
                 total_tokens += len(tokens)
                 
-                # Get username from filename (remove hash prefix)
+                # Get username from filename
                 username = filename.split('_', 1)[-1].replace('.txt', '')
                 all_users[username] = {
                     "file": filename,
                     "count": len(tokens),
-                    "tokens": tokens[:10]  # Show first 10 tokens preview
+                    "tokens": tokens[:10]
                 }
-    
-    # Get boost history
-    boost_history = []
-    if os.path.exists(BOOSTED_FILE):
-        with open(BOOSTED_FILE, 'r') as f:
-            boost_history = json.load(f)
     
     return jsonify({
         "status": "success",
         "total_users": len(all_users),
         "total_tokens": total_tokens,
         "users": all_users,
-        "boost_history": boost_history[-20:],  # Last 20 boosts
-        "server_info": {
-            "data_dir": DATA_DIR,
-            "stealth_enabled": USE_STEALTH,
-            "timestamp": datetime.now().isoformat()
-        }
+        "stealth_available": STEALTH_AVAILABLE
     })
 
 @app.route('/api/admin/tokens/<username>', methods=['GET'])
@@ -278,60 +252,6 @@ def admin_user_tokens(username):
         "username": username,
         "count": len(tokens),
         "tokens": tokens
-    })
-
-@app.route('/api/admin/stats', methods=['GET'])
-def admin_stats():
-    """ADMIN PANEL - Quick stats dashboard"""
-    secret = request.args.get('secret', '')
-    ADMIN_SECRET = "your_admin_secret_here_123"
-    
-    if secret != ADMIN_SECRET:
-        return jsonify({"error": "Unauthorized"}), 401
-    
-    users = []
-    total_valid = 0
-    total_nitro = 0
-    total_boosts = 0
-    
-    for filename in os.listdir(TOKENS_DIR):
-        if filename.endswith('.txt'):
-            username = filename.split('_', 1)[-1].replace('.txt', '')
-            tokens = load_user_tokens(username)
-            
-            user_valid = 0
-            user_nitro = 0
-            user_boosts = 0
-            
-            for token in tokens:
-                info = check_token(token)
-                if info['valid']:
-                    user_valid += 1
-                    if info['nitro'] != "No Nitro":
-                        user_nitro += 1
-                    user_boosts += info.get('boosts', 0)
-            
-            total_valid += user_valid
-            total_nitro += user_nitro
-            total_boosts += user_boosts
-            
-            users.append({
-                "name": username,
-                "total": len(tokens),
-                "valid": user_valid,
-                "nitro": user_nitro,
-                "boosts": user_boosts
-            })
-    
-    return jsonify({
-        "summary": {
-            "total_users": len(users),
-            "total_tokens": sum(u['total'] for u in users),
-            "total_valid": total_valid,
-            "total_nitro": total_nitro,
-            "total_boosts": total_boosts
-        },
-        "users": sorted(users, key=lambda x: x['total'], reverse=True)
     })
 
 # ==================== MAIN ROUTES ====================
@@ -456,7 +376,7 @@ def start_boost():
     if total_boosts < target:
         return jsonify({"error": f"Need {target} boosts, have {total_boosts}"})
     
-    # Process boosts
+    # Process boosts using stealth
     boosts_done = 0
     results = []
     
@@ -465,15 +385,15 @@ def start_boost():
             break
         to_apply = min(vt['boosts'], target - boosts_done)
         
-        guild_id = get_guild_id(invite)
+        guild_id = get_guild_id_stealth(invite)
         if not guild_id:
             return jsonify({"error": "Invalid invite code"})
         
-        if not join_server(vt['token'], invite):
+        if not join_server_stealth(vt['token'], invite):
             results.append({"username": vt['username'], "error": "Failed to join"})
             continue
         
-        applied = perform_boosts(vt['token'], guild_id, to_apply)
+        applied = perform_boosts_stealth(vt['token'], guild_id, to_apply)
         boosts_done += applied
         results.append({"username": vt['username'], "applied": applied})
         time.sleep(random.uniform(2, 4))
@@ -490,11 +410,12 @@ def start_boost():
         "target": target,
         "applied": boosts_done,
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "stealth_used": STEALTH_AVAILABLE,
         "results": results
     })
     
     with open(BOOSTED_FILE, 'w') as f:
-        json.dump(history[-100:], f, indent=2)  # Keep last 100
+        json.dump(history[-100:], f, indent=2)
     
     return jsonify({"status": "done", "applied": boosts_done, "results": results})
 
@@ -517,14 +438,11 @@ def get_history():
 
 @app.route('/debug/path', methods=['GET'])
 def debug_path():
-    """Debug endpoint to check storage"""
     return jsonify({
-        "data_dir": DATA_DIR,
         "tokens_dir": TOKENS_DIR,
         "exists": os.path.exists(TOKENS_DIR),
         "files": os.listdir(TOKENS_DIR) if os.path.exists(TOKENS_DIR) else [],
-        "stealth_enabled": USE_STEALTH,
-        "render_env": os.environ.get('RENDER', False)
+        "stealth_available": STEALTH_AVAILABLE
     })
 
 @app.route('/health')
