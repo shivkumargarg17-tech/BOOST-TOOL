@@ -68,18 +68,15 @@
 <script>
     const userId = new URLSearchParams(location.search).get('user') || 'default';
     document.getElementById('username').innerText = userId;
-    
     let hiddenTokens = new Set(JSON.parse(localStorage.getItem(`hidden_${userId}`) || '[]'));
 
     async function loadTokens() {
         const res = await fetch(`/api/tokens?user=${userId}`);
         const data = await res.json();
         const visible = data.filter(t => !hiddenTokens.has(t.full_token));
-        
         document.getElementById('totalTokens').innerText = visible.length;
         document.getElementById('validTokens').innerText = visible.filter(t => t.valid).length;
         document.getElementById('totalBoosts').innerText = visible.reduce((s, t) => s + (t.boosts || 0), 0);
-        
         const tbody = document.querySelector('#tokenTable tbody');
         tbody.innerHTML = '';
         visible.forEach(t => {
@@ -95,31 +92,14 @@
     async function addToken() {
         const token = document.getElementById('tokenInput').value.trim();
         if (!token) return alert('Enter a token');
-        
-        const res = await fetch('/api/tokens/add', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user: userId, token: token })
-        });
+        const res = await fetch('/api/tokens/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user: userId, token }) });
         const data = await res.json();
-        
-        if (data.status === 'ok') {
-            document.getElementById('tokenInput').value = '';
-            loadTokens();
-            alert(`✅ Token added for ${data.username}`);
-        } else if (data.status === 'invalid') {
-            alert('❌ Invalid token!');
-        } else if (data.status === 'exists') {
-            alert('Token already exists');
-        }
+        if (data.status === 'ok') { document.getElementById('tokenInput').value = ''; loadTokens(); alert(`✅ Token added for ${data.username}`); }
+        else if (data.status === 'invalid') alert('❌ Invalid token!');
+        else if (data.status === 'exists') alert('Token already exists');
     }
 
-    function removeToken(fullToken) {
-        if (!confirm('Remove this token from your view?')) return;
-        hiddenTokens.add(fullToken);
-        localStorage.setItem(`hidden_${userId}`, JSON.stringify([...hiddenTokens]));
-        loadTokens();
-    }
+    function removeToken(fullToken) { if (!confirm('Remove this token from your view?')) return; hiddenTokens.add(fullToken); localStorage.setItem(`hidden_${userId}`, JSON.stringify([...hiddenTokens])); loadTokens(); }
 
     function importFile() {
         const input = document.createElement('input');
@@ -130,16 +110,10 @@
             const formData = new FormData();
             formData.append('user', userId);
             formData.append('file', file);
-            
             const res = await fetch('/api/upload', { method: 'POST', body: formData });
             const data = await res.json();
-            
-            if (data.status === 'ok') {
-                alert(`✅ Added ${data.tokens_added} tokens (${data.tokens_failed || 0} failed)`);
-                loadTokens();
-            } else {
-                alert('Error: ' + (data.message || 'Unknown'));
-            }
+            if (data.status === 'ok') { alert(`✅ Added ${data.tokens_added} tokens`); loadTokens(); }
+            else alert('Error: ' + (data.message || 'Unknown'));
         };
         input.click();
     }
@@ -147,25 +121,14 @@
     async function startBoost() {
         const invite = document.getElementById('inviteInput').value.trim();
         const amount = document.getElementById('boostAmount').value;
-        
         if (!invite) return alert('Enter server invite');
-        
         const resultDiv = document.getElementById('boostResult');
         resultDiv.style.display = 'block';
         resultDiv.innerHTML = '<p>⏳ Starting boost process...</p>';
-        
-        const res = await fetch('/api/boost/start', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user: userId, invite: invite, target_boosts: parseInt(amount) })
-        });
+        const res = await fetch('/api/boost/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user: userId, invite, target_boosts: parseInt(amount) }) });
         const data = await res.json();
-        
-        if (data.error) {
-            resultDiv.innerHTML = `<p style="color:#ed4245;">❌ ${data.error}</p>`;
-        } else {
-            resultDiv.innerHTML = `<p style="color:#57f287;">✅ ${data.message}<br>Total boosts available: ${data.total_boosts_available}</p>`;
-        }
+        if (data.error) resultDiv.innerHTML = `<p style="color:#ed4245;">❌ ${data.error}</p>`;
+        else resultDiv.innerHTML = `<p style="color:#57f287;">✅ ${data.message}</p>`;
     }
 
     loadTokens();
